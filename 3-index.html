@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>CIEL - voice companion</title>
+<meta name="description" content="CIEL is a voice-first 3D companion that lives in your browser. Talk to her - she listens, thinks, and speaks back.">
+<meta name="theme-color" content="#f4f1ea">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23f4f1ea'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%2317150f' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%23d93a2b'/%3E%3C/svg%3E">
+<style>
+:root{
+  --field:#f4f1ea;
+  --ink:#17150f;
+  --ink-soft:rgba(23,21,15,.62);
+  --ink-faint:rgba(23,21,15,.34);
+  --hairline:rgba(23,21,15,.16);
+  --red:#d93a2b;
+  --blue:#274b8f;
+  --sans:"Avenir Next","Helvetica Neue",Helvetica,"Segoe UI",system-ui,sans-serif;
+  --mono:"SF Mono",ui-monospace,"Roboto Mono","Cascadia Mono",Menlo,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{width:100%;height:100%;overflow:hidden;background:var(--field);font-family:var(--sans);color:var(--ink)}
+#stage{position:fixed;inset:0;display:block;touch-action:none}
+
+/* ---------- boot ---------- */
+#boot{position:fixed;inset:0;background:var(--field);z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;transition:opacity .7s ease;cursor:pointer}
+#boot.gone{opacity:0;pointer-events:none}
+#boot .mark{font-family:var(--mono);font-size:11px;letter-spacing:.42em;color:var(--ink-soft)}
+#boot h1{font-size:clamp(44px,9vw,84px);font-weight:700;letter-spacing:.08em;line-height:1}
+#boot .sub{font-size:13px;color:var(--ink-soft);letter-spacing:.06em}
+#boot .cta{margin-top:14px;font-family:var(--mono);font-size:11px;letter-spacing:.3em;color:var(--red);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:.45}50%{opacity:1}}
+#boot .ring{width:52px;height:52px;border-radius:50%;border:1.5px solid var(--hairline);border-top-color:var(--ink);animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- frame furniture ---------- */
+.rail{position:fixed;z-index:20;font-family:var(--mono);font-size:10px;letter-spacing:.22em;color:var(--ink-soft);pointer-events:none;text-transform:uppercase}
+#rail-tl{top:18px;left:20px}
+#rail-tl .name{font-size:12px;color:var(--ink);letter-spacing:.34em}
+#rail-tl .ver{margin-top:4px}
+#rail-tr{top:88px;right:20px;text-align:right}
+#rail-bl{bottom:16px;left:20px}
+#rail-br{bottom:16px;right:20px;text-align:right}
+.corner{position:fixed;width:14px;height:14px;z-index:20;pointer-events:none;opacity:.5}
+.corner::before,.corner::after{content:"";position:absolute;background:var(--ink)}
+.corner::before{width:100%;height:1px}
+.corner::after{width:1px;height:100%}
+#c-tl{top:10px;left:10px}
+#c-tr{top:10px;right:10px;transform:scaleX(-1)}
+#c-bl{bottom:10px;left:10px;transform:scaleY(-1)}
+#c-br{bottom:10px;right:10px;transform:scale(-1)}
+
+/* ---------- status pill ---------- */
+#status{position:fixed;top:52px;right:20px;z-index:25;display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10px;letter-spacing:.26em;color:var(--ink);text-transform:uppercase}
+#status .dot{width:7px;height:7px;border-radius:50%;background:var(--ink-faint);transition:background .25s}
+#status[data-state="LISTENING"] .dot{background:var(--red);animation:pulse 1.1s infinite}
+#status[data-state="THINKING"] .dot{background:var(--blue);animation:pulse .7s infinite}
+#status[data-state="SPEAKING"] .dot{background:var(--ink);animation:pulse 1.6s infinite}
+#status[data-state="SLEEPING"] .dot{background:var(--ink-faint)}
+
+/* ---------- transcript ---------- */
+#transcript{position:fixed;left:50%;transform:translateX(-50%);bottom:118px;z-index:22;width:min(620px,86vw);text-align:center;pointer-events:none}
+#her-line{font-size:clamp(17px,2.4vw,22px);font-weight:500;letter-spacing:.01em;line-height:1.45;min-height:1.4em;transition:opacity .3s}
+#you-line{margin-top:8px;font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--ink-soft);text-transform:uppercase;min-height:1.2em}
+#you-line .live{color:var(--red)}
+
+/* ---------- control bar ---------- */
+#bar{position:fixed;left:50%;transform:translateX(-50%);bottom:26px;z-index:30;display:flex;align-items:center;gap:14px}
+#mic{position:relative;width:64px;height:64px;border-radius:50%;border:1.5px solid var(--ink);background:var(--field);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform .12s,background .25s,border-color .25s;flex:none}
+#mic:active{transform:scale(.93)}
+#mic svg{width:22px;height:22px;stroke:var(--ink);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;transition:stroke .25s}
+#mic.on{background:var(--red);border-color:var(--red)}
+#mic.on svg{stroke:#fff}
+#mic .halo{position:absolute;inset:-7px;border-radius:50%;border:1px solid var(--red);opacity:0;pointer-events:none}
+#mic.on .halo{opacity:1;animation:halo 1.4s ease-out infinite}
+@keyframes halo{0%{transform:scale(.9);opacity:.8}100%{transform:scale(1.35);opacity:0}}
+#level{width:74px;height:30px;display:flex;align-items:center;gap:2.5px;flex:none}
+#level i{flex:1;background:var(--ink);height:2px;transition:height .08s;opacity:.85}
+#typewrap{display:flex;align-items:center;border-bottom:1px solid var(--hairline);transition:border-color .25s}
+#typewrap:focus-within{border-color:var(--ink)}
+#typein{background:transparent;border:0;outline:0;font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:var(--ink);width:190px;padding:8px 2px}
+#typein::placeholder{color:var(--ink-faint)}
+#sendbtn{background:none;border:0;cursor:pointer;font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:var(--ink-soft);padding:8px 2px 8px 10px}
+#sendbtn:hover{color:var(--red)}
+.keyhint{position:fixed;bottom:102px;left:50%;transform:translateX(-50%);z-index:21;font-family:var(--mono);font-size:9px;letter-spacing:.3em;color:var(--ink-faint);text-transform:uppercase;pointer-events:none}
+
+/* ---------- settings ---------- */
+#gearbtn{position:fixed;top:14px;right:20px;z-index:31;width:30px;height:30px;background:none;border:0;cursor:pointer;opacity:.55}
+#gearbtn:hover{opacity:1}
+#gearbtn svg{width:16px;height:16px;stroke:var(--ink);fill:none;stroke-width:1.6;stroke-linecap:round}
+#gear{position:fixed;top:52px;right:20px;z-index:32;width:250px;background:var(--field);border:1px solid var(--hairline);padding:16px 18px;display:none;box-shadow:0 12px 40px rgba(23,21,15,.10)}
+#gear.open{display:block}
+#gear h2{font-family:var(--mono);font-size:10px;letter-spacing:.3em;color:var(--ink-soft);text-transform:uppercase;margin-bottom:12px}
+#gear label{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--ink-faint);text-transform:uppercase;margin:12px 0 5px}
+#gear select,#gear input[type=range]{width:100%;font-family:var(--mono);font-size:11px;color:var(--ink);background:transparent;border:1px solid var(--hairline);padding:6px 8px;outline:0}
+#gear input[type=range]{padding:0;border:0;accent-color:var(--red)}
+#gear .row{display:flex;justify-content:space-between;align-items:center;margin-top:12px}
+#gear .row span{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--ink-faint);text-transform:uppercase}
+#gear .val{font-family:var(--mono);font-size:10px;color:var(--ink)}
+#wipebtn{margin-top:14px;width:100%;background:none;border:1px solid var(--hairline);font-family:var(--mono);font-size:9px;letter-spacing:.24em;color:var(--ink-soft);padding:7px 0;cursor:pointer;text-transform:uppercase}
+#wipebtn:hover{border-color:var(--red);color:var(--red)}
+
+/* ---------- selftest ---------- */
+#selftest{position:fixed;left:20px;top:64px;z-index:40;font-family:var(--mono);font-size:10px;line-height:1.8;color:var(--ink);background:rgba(244,241,234,.92);border:1px solid var(--hairline);padding:10px 14px;display:none;white-space:pre}
+
+@media (max-width:760px){
+  #rail-bl,#rail-br,.keyhint{display:none}
+  #transcript{bottom:112px}
+  #typein{width:120px}
+  #level{display:none}
+  #rail-tl .name{font-size:10px}
+}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+
+<div id="boot">
+  <div class="mark">VOICE-LINK 03 · COMPANION UNIT</div>
+  <h1>CIEL</h1>
+  <div class="ring" id="bootring"></div>
+  <div class="sub" id="bootmsg">warming up the room</div>
+  <div class="cta" id="bootcta" style="display:none">TAP ANYWHERE TO BEGIN</div>
+</div>
+
+<div class="rail" id="rail-tl"><div class="name">CIEL</div><div class="ver">VOICE COMPANION · V1.0</div></div>
+<div class="rail" id="rail-tr"><div id="clock">--:--</div><div id="memct" style="margin-top:4px">MEM 0</div></div>
+<div class="rail" id="rail-bl">SHE LISTENS · SHE REMEMBERS · SHE'S YOURS</div>
+<div class="rail" id="rail-br">WEBSPEECH × POLLINATIONS × THREE.JS — ALL FREE</div>
+<div class="corner" id="c-tl"></div><div class="corner" id="c-tr"></div><div class="corner" id="c-bl"></div><div class="corner" id="c-br"></div>
+
+<div id="status" data-state="IDLE"><span class="dot"></span><span id="statetext">IDLE</span></div>
+
+<button id="gearbtn" aria-label="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1"/></svg></button>
+<div id="gear">
+  <h2>Voice Console</h2>
+  <label>Her voice</label>
+  <select id="voicesel"></select>
+  <div class="row"><span>Rate</span><span class="val" id="rateval">1.00</span></div>
+  <input type="range" id="rate" min="0.7" max="1.4" step="0.05" value="1.02">
+  <div class="row"><span>Pitch</span><span class="val" id="pitchval">1.10</span></div>
+  <input type="range" id="pitch" min="0.6" max="1.8" step="0.05" value="1.15">
+  <div class="row"><span>Brain</span><span class="val" id="brainstate">POLLINATIONS</span></div>
+  <button id="wipebtn">Forget everything</button>
+</div>
+
+<div id="transcript">
+  <div id="her-line"></div>
+  <div id="you-line"></div>
+</div>
+<div class="keyhint">HOLD SPACE OR TAP THE MIC · TYPE IF YOU'D RATHER</div>
+
+<div id="bar">
+  <button id="mic" aria-label="talk to Ciel">
+    <span class="halo"></span>
+    <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3.5"/></svg>
+  </button>
+  <div id="level"></div>
+  <div id="typewrap">
+    <input id="typein" placeholder="or type to her..." autocomplete="off" spellcheck="false">
+    <button id="sendbtn">SEND</button>
+  </div>
+</div>
+
+<div id="selftest"></div>
+
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+/* ============================================================
+   CIEL - a voice-first companion
+   renderer / character / voice loop
+   ============================================================ */
+const qs = new URLSearchParams(location.search);
+const SELFTEST = qs.has('selftest');
+const params = {
+  demo: qs.has('demo'),
+  pose: qs.get('pose') || null,
+  emotion: qs.get('emotion') || null,
+};
+
+const canvas = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:false});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf4f1ea);
+scene.fog = new THREE.Fog(0xf4f1ea, 9, 22);
+
+const camera = new THREE.PerspectiveCamera(34, 1, .1, 60);
+camera.position.set(0, 1.5, 4.5);
+camera.lookAt(0, 1.34, 0);
+
+/* ---------- light ---------- */
+scene.add(new THREE.HemisphereLight(0xfff6e8, 0xcfc8ba, .95));
+const key = new THREE.DirectionalLight(0xfff2df, 1.55);
+key.position.set(2.4, 4.2, 3.0);
+key.castShadow = true;
+key.shadow.mapSize.set(1024, 1024);
+key.shadow.camera.left = -3; key.shadow.camera.right = 3;
+key.shadow.camera.top = 4; key.shadow.camera.bottom = -1;
+key.shadow.radius = 6;
+scene.add(key);
+const rim = new THREE.DirectionalLight(0xdfe8ff, 1.1);
+rim.position.set(-2.6, 2.6, -2.4);
+scene.add(rim);
+
+/* ---------- stage floor ---------- */
+{
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const rg = g.createRadialGradient(128,128,10,128,128,128);
+  rg.addColorStop(0,'rgba(23,21,15,.20)');
+  rg.addColorStop(.55,'rgba(23,21,15,.07)');
+  rg.addColorStop(1,'rgba(23,21,15,0)');
+  g.fillStyle = rg; g.fillRect(0,0,256,256);
+  const tex = new THREE.CanvasTexture(c);
+  const disc = new THREE.Mesh(
+    new THREE.CircleGeometry(2.1, 48),
+    new THREE.MeshBasicMaterial({map:tex, transparent:true, depthWrite:false})
+  );
+  disc.rotation.x = -Math.PI/2; disc.position.y = .001;
+  scene.add(disc);
+}
+
+/* ---------- toon helpers ---------- */
+function gradMap(steps){
+  const data = new Uint8Array(steps);
+  for (let i=0;i<steps;i++) data[i] = Math.round(90 + i*(165/(steps-1)));
+  const t = new THREE.DataTexture(data, steps, 1, THREE.RedFormat);
+  t.needsUpdate = true; t.minFilter = t.magFilter = THREE.NearestFilter;
+  return t;
+}
+const GRAD = gradMap(3);
+const toon = (color, opts={}) => new THREE.MeshToonMaterial(Object.assign({color, gradientMap:GRAD}, opts));
+const flat = (color, opts={}) => new THREE.MeshBasicMaterial(Object.assign({color}, opts));
+
+const PAL = {
+  skin: 0xffe3d2,
+  skinShade: 0xf7cdb9,
+  hair: 0xcfe0ee,
+  hairDark: 0xaebfd4,
+  eye: 0x274b8f,
+  lash: 0x241d1a,
+  blush: 0xf0938a,
+  mouth: 0x8a3d33,
+  lip: 0xc46a5e,
+  cloth: 0x232c3d,
+  clothLight: 0x33405a,
+  collar: 0xf6f2e9,
+  scarf: 0xd93a2b,
+  sock: 0xf6f2e9,
+  shoe: 0x3a3230,
+};
+
+/* springy scalar */
+class Spring {
+  constructor(v=0, k=140, d=14){ this.x=v; this.v=0; this.t=v; this.k=k; this.d=d; }
+  step(dt){
+    const a = (this.t - this.x)*this.k - this.v*this.d;
+    this.v += a*dt; this.x += this.v*dt;
+    return this.x;
+  }
+}
+const lerp = (a,b,t)=>a+(b-a)*t;
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const damp = (a,b,l,dt)=>lerp(a,b,1-Math.exp(-l*dt));
+
+/* ============================================================
+   CHARACTER BUILD
+   ============================================================ */
+const ciel = new THREE.Group();
+scene.add(ciel);
+const castShadow = m => { m.castShadow = true; return m; };
+
+/* ----- legs ----- */
+function makeLeg(side){
+  const hip = new THREE.Group();
+  hip.position.set(.05*side, .88, 0);
+  const thigh = castShadow(new THREE.Mesh(new THREE.CapsuleGeometry(.032,.24,6,14), toon(PAL.skin)));
+  thigh.position.y = -.14;
+  const knee = new THREE.Group(); knee.position.y = -.32;
+  /* thigh-high stocking: upper band + calf */
+  const stockingTop = castShadow(new THREE.Mesh(new THREE.CapsuleGeometry(.030,.16,6,14), toon(PAL.cloth)));
+  stockingTop.position.y = -.07;
+  const band = new THREE.Mesh(new THREE.TorusGeometry(.0315,.0045,8,20), flat(PAL.scarf));
+  band.rotation.x = Math.PI/2; band.position.y = -.155;
+  const calf = castShadow(new THREE.Mesh(new THREE.CapsuleGeometry(.027,.30,6,14), toon(PAL.cloth)));
+  calf.position.y = -.19;
+  const shoe = castShadow(new THREE.Mesh(new THREE.SphereGeometry(.05,18,14), toon(PAL.shoe)));
+  shoe.scale.set(.9,.55,1.7); shoe.position.set(0,-.375,.03);
+  const heel = new THREE.Mesh(new THREE.BoxGeometry(.03,.045,.03), toon(PAL.shoe));
+  heel.position.set(0,-.385,-.022);
+  knee.add(stockingTop, band, calf, shoe, heel);
+  hip.add(thigh, knee);
+  return hip;
+}
+ciel.add(makeLeg(1), makeLeg(-1));
+
+/* ----- skirt (pleated) ----- */
+{
+  const c = document.createElement('canvas'); c.width = 512; c.height = 64;
+  const g = c.getContext('2d');
+  for (let i=0;i<16;i++){
+    g.fillStyle = i%2 ? '#232b3f' : '#171d2c';
+    g.fillRect(i*32,0,32,64);
+    g.fillStyle = 'rgba(255,255,255,.05)';
+    g.fillRect(i*32,0,3,64);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.RepeatWrapping;
+  const skirt = castShadow(new THREE.Mesh(
+    new THREE.CylinderGeometry(.092,.185,.17,28,1,true),
+    new THREE.MeshToonMaterial({map:tex, gradientMap:GRAD, side:THREE.DoubleSide})
+  ));
+  skirt.position.y = .895;
+  ciel.add(skirt);
+}
+
+/* ----- torso ----- */
+const chestGroup = new THREE.Group();
+ciel.add(chestGroup);
+{
+  /* fitted off-shoulder top: hips -> pinched waist -> bust */
+  const pts = [];
+  const prof = [[.094,0],[.090,.04],[.072,.12],[.068,.16],[.084,.24],[.097,.29],[.095,.335],[.076,.385],[.058,.42]];
+  for (const [r,y] of prof) pts.push(new THREE.Vector2(r,y));
+  const torso = castShadow(new THREE.Mesh(new THREE.LatheGeometry(pts,26), toon(PAL.cloth)));
+  torso.position.y = .90;
+  chestGroup.add(torso);
+  /* neckline band of the top */
+  const topEdge = new THREE.Mesh(new THREE.TorusGeometry(.058,.009,10,24), toon(PAL.cloth));
+  topEdge.rotation.x = Math.PI/2; topEdge.position.y = 1.318; topEdge.scale.set(1,1,.8);
+  chestGroup.add(topEdge);
+  /* bare shoulders */
+  const sh = [];
+  for (const [r,y] of [[.058,0],[.052,.03],[.040,.07],[.033,.10]]) sh.push(new THREE.Vector2(r,y));
+  const shoulders = castShadow(new THREE.Mesh(new THREE.LatheGeometry(sh,22), toon(PAL.skin)));
+  shoulders.position.y = 1.30;
+  chestGroup.add(shoulders);
+  /* choker */
+  const choker = new THREE.Mesh(new THREE.TorusGeometry(.0345,.0055,8,20), flat(PAL.scarf));
+  choker.rotation.x = Math.PI/2; choker.position.y = 1.345;
+  chestGroup.add(choker);
+  /* neck */
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(.030,.034,.06,14), toon(PAL.skin));
+  neck.position.y = 1.345;
+  chestGroup.add(neck);
+}
+
+/* ----- arms ----- */
+function makeArm(side){
+  const shoulder = new THREE.Group();
+  shoulder.position.set(.080*side, 1.345, 0);
+  const cap0 = castShadow(new THREE.Mesh(new THREE.SphereGeometry(.027,12,10), toon(PAL.skin)));
+  cap0.position.set(-.012*side, 0, 0);
+  shoulder.add(cap0);
+  const upper = castShadow(new THREE.Mesh(new THREE.CapsuleGeometry(.0215,.14,6,12), toon(PAL.skin)));
+  upper.position.y = -.105;
+  const elbow = new THREE.Group(); elbow.position.y = -.21;
+  const fore = castShadow(new THREE.Mesh(new THREE.CapsuleGeometry(.019,.14,6,12), toon(PAL.skin)));
+  fore.position.y = -.09;
+  const hand = castShadow(new THREE.Mesh(new THREE.SphereGeometry(.026,14,12), toon(PAL.skin)));
+  hand.scale.set(.85,1.15,.9); hand.position.y = -.185;
+  elbow.add(fore, hand);
+  shoulder.add(upper, elbow);
+  ciel.add(shoulder);
+  return {shoulder, elbow, hand};
+}
+const armL = makeArm(-1), armR = makeArm(1);
+
+/* ----- head ----- */
+const headGroup = new THREE.Group();
+headGroup.position.set(0, 1.355, 0);
+ciel.add(headGroup);
+const headInner = new THREE.Group();
+headInner.position.y = .125;
+headInner.scale.set(.92,.92,.92);
+headGroup.add(headInner);
+
+{
+  const skull = castShadow(new THREE.Mesh(new THREE.SphereGeometry(.155,32,26), toon(PAL.skin)));
+  skull.scale.set(1,1.06,.96);
+  headInner.add(skull);
+  /* ears */
+  for (const s of [-1,1]){
+    const ear = new THREE.Mesh(new THREE.SphereGeometry(.028,12,10), toon(PAL.skin));
+    ear.scale.set(.5,1,.7); ear.position.set(.152*s,-.01,0);
+    headInner.add(ear);
+  }
+}
+
+/* face anchor */
+const face = new THREE.Group();
+face.position.set(0,-.005,.138);
+headInner.add(face);
+
+function makeEye(side){
+  const g = new THREE.Group();
+  g.position.set(.057*side,.015,.006);
+  const sclera = new THREE.Mesh(new THREE.SphereGeometry(.032,20,16), flat(0xfffdfa));
+  sclera.scale.set(1,1.32,.28);
+  const iris = new THREE.Mesh(new THREE.SphereGeometry(.02,18,14), flat(PAL.eye));
+  iris.scale.set(1,1.42,.5); iris.position.z = .012;
+  const pupil = new THREE.Mesh(new THREE.SphereGeometry(.009,12,10), flat(0x14100e));
+  pupil.scale.set(1,1.5,.5); pupil.position.z = .021;
+  const hl = new THREE.Mesh(new THREE.CircleGeometry(.0062,10), flat(0xffffff));
+  hl.position.set(.008,.012,.026);
+  const hl2 = new THREE.Mesh(new THREE.CircleGeometry(.0028,8), flat(0xffffff));
+  hl2.position.set(-.007,-.009,.026);
+  const lash = new THREE.Mesh(new THREE.TorusGeometry(.0335,.0042,8,20,Math.PI*1.05), flat(PAL.lash));
+  lash.rotation.z = Math.PI*-.02 + Math.PI*0.0;
+  lash.rotation.x = 0;
+  lash.position.z = .014;
+  lash.scale.set(1.16,1.05,.6);
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(.018,.0045,.004), flat(PAL.lash));
+  wing.position.set(.040*side,.028,.012);
+  wing.rotation.z = -.48*side;
+  g.add(sclera, iris, pupil, hl, hl2, lash, wing);
+  face.add(g);
+  return {g, iris, pupil, lash};
+}
+const eyeL = makeEye(-1), eyeR = makeEye(1);
+
+/* brows */
+function makeBrow(side){
+  const b = new THREE.Mesh(new THREE.CapsuleGeometry(.0035,.030,4,8), flat(PAL.lash));
+  b.rotation.z = Math.PI/2 + .10*side;
+  b.position.set(.058*side,.072,.012);
+  face.add(b);
+  return b;
+}
+const browL = makeBrow(-1), browR = makeBrow(1);
+
+/* mouth */
+const mouthSmile = new THREE.Mesh(new THREE.TorusGeometry(.0165,.0030,8,22,Math.PI*.92), flat(PAL.lip));
+mouthSmile.rotation.z = Math.PI*1.04;
+mouthSmile.position.set(0,-.048,.012);
+face.add(mouthSmile);
+const mouthOpen = new THREE.Mesh(new THREE.SphereGeometry(.014,16,12), flat(PAL.mouth));
+mouthOpen.scale.set(1.15,.25,.5);
+mouthOpen.position.set(0,-.052,.010);
+face.add(mouthOpen);
+const mouthTongue = new THREE.Mesh(new THREE.SphereGeometry(.008,12,10), flat(0xd97a70));
+mouthTongue.scale.set(1.1,.5,.5);
+mouthTongue.position.set(0,-.058,.016);
+mouthTongue.visible = false;
+face.add(mouthTongue);
+
+/* blush */
+const blushMat = new THREE.MeshBasicMaterial({color:PAL.blush, transparent:true, opacity:0});
+function makeBlush(side){
+  const b = new THREE.Mesh(new THREE.CircleGeometry(.015,12), blushMat);
+  b.position.set(.093*side,-.026,.004);
+  b.rotation.y = .35*side;
+  face.add(b);
+  return b;
+}
+makeBlush(-1); makeBlush(1);
+
+/* ----- hair ----- */
+const hairGroup = new THREE.Group();
+headInner.add(hairGroup);
+const hairMat = toon(PAL.hair);
+{
+  /* back mass - hugging the skull, never crossing the face plane */
+  const back = castShadow(new THREE.Mesh(new THREE.SphereGeometry(.165,26,22), hairMat));
+  back.scale.set(1.02,1.16,.82);
+  back.position.set(0,-.025,-.072);
+  hairGroup.add(back);
+  /* lower fall down her back */
+  const fall = castShadow(new THREE.Mesh(new THREE.SphereGeometry(.135,22,18), hairMat));
+  fall.scale.set(.85,2.05,.6);
+  fall.position.set(0,-.28,-.105);
+  hairGroup.add(fall);
+  /* crown cap so scalp never shows */
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(.162,26,20,0,Math.PI*2,0,Math.PI*.55), hairMat);
+  cap.position.set(0,.012,-.002);
+  hairGroup.add(cap);
+  /* bangs - petal row */
+  const bang = (x,y,z,ry,rz,sx,sy)=>{
+    const p = castShadow(new THREE.Mesh(new THREE.SphereGeometry(.05,14,12), hairMat));
+    p.scale.set(sx,sy,.5);
+    p.position.set(x,y,z);
+    p.rotation.set(.1,ry,rz);
+    hairGroup.add(p);
+    return p;
+  };
+  bang(   0, .072,.132,   0,   0, 1.0,1.55);
+  bang(-.062,.066,.124,  .3, .30, .85,1.4);
+  bang( .062,.066,.124, -.3,-.30, .85,1.4);
+  bang(-.108,.048,.100,  .55, .52, .72,1.25);
+  bang( .108,.048,.100, -.55,-.52, .72,1.25);
+  bang(-.032,.045,.130,  .12, .12, .62,1.1);
+  bang( .032,.045,.130, -.12,-.12, .62,1.1);
+  /* side locks */
+  for (const s of [-1,1]){
+    const lock = castShadow(new THREE.Mesh(new THREE.SphereGeometry(.05,14,14), hairMat));
+    lock.scale.set(.46,2.8,.44);
+    lock.position.set(.146*s,-.16,.032);
+    lock.rotation.z = -.06*s;
+    lock.userData.side = s;
+    hairGroup.add(lock);
+    lock.name = s<0 ? 'lockL' : 'lockR';
+  }
+  /* ahoge */
+  const aho = new THREE.Mesh(new THREE.TorusGeometry(.032,.005,6,14,Math.PI*1.25), hairMat);
+  aho.position.set(.012,.165,0);
+  aho.rotation.set(.2,.3,1.9);
+  hairGroup.add(aho);
+}
+const lockL = hairGroup.getObjectByName('lockL');
+const lockR = hairGroup.getObjectByName('lockR');
+
+/* ============================================================
+   EXPRESSION + POSE SYSTEM
+   ============================================================ */
+const EMOTIONS = {
+  neutral:  {browY:.072, browTilt:.10, eyeH:1.0, smile:1.0, openBase:0,   blush:0,  headTilt:0,  pitch:0},
+  happy:    {browY:.078, browTilt:.16, eyeH:.82, smile:1.5, openBase:.18, blush:.5, headTilt:.06,pitch:-.02},
+  love:     {browY:.078, browTilt:.18, eyeH:.62, smile:1.6, openBase:.22, blush:1,  headTilt:.10,pitch:-.03},
+  sad:      {browY:.066, browTilt:-.14,eyeH:.8,  smile:.55, openBase:0,   blush:.15,headTilt:.05,pitch:.09},
+  surprised:{browY:.086, browTilt:.04, eyeH:1.25,smile:.2,  openBase:.55, blush:.2, headTilt:0,  pitch:-.05},
+  thinking: {browY:.070, browTilt:-.06,eyeH:.9,  smile:.8,  openBase:0,   blush:0,  headTilt:.12,pitch:.07},
+  sleepy:   {browY:.066, browTilt:.02, eyeH:.35, smile:.9,  openBase:0,   blush:.1, headTilt:.09,pitch:.12},
+};
+const expr = {  /* live, lerped toward target */
+  browY:.072, browTilt:.10, eyeH:1, smile:1, openBase:0, blush:0, headTilt:0, pitch:0
+};
+let exprTarget = EMOTIONS.neutral;
+let emotionName = 'neutral';
+function setEmotion(name){
+  if (!EMOTIONS[name]) name = 'neutral';
+  emotionName = name;
+  exprTarget = EMOTIONS[name];
+}
+
+/* poses: shoulder/elbow rotation targets */
+const POSES = {
+  rest:   {sl:[0,0,-.14], el:[0,0,-.12], sr:[0,0, .14], er:[0,0, .12]},
+  talk:   {sl:[0,0,-.20], el:[-.25,0,-.25], sr:[0,0,.20], er:[-.25,0,.25]},
+  wave:   {sl:[0,0,-.14], el:[0,0,-.12], sr:[0,.3,2.35], er:[0,0,.5]},
+  think:  {sl:[0,0,-.14], el:[0,0,-.12], sr:[-.2,0,.55], er:[-1.85,0,-.35]},
+  excited:{sl:[-.3,0,-.5], el:[-.6,0,-.3], sr:[-.3,0,.5], er:[-.6,0,.3]},
+};
+let poseTarget = POSES.rest;
+const poseLive = JSON.parse(JSON.stringify(POSES.rest));
+function setPose(name){ poseTarget = POSES[name] || POSES.rest; }
+
+/* gaze */
+const gaze = {x:0, y:0, tx:0, ty:0};
+addEventListener('pointermove', e=>{
+  gaze.tx = (e.clientX/innerWidth - .5) * 2;
+  gaze.ty = (e.clientY/innerHeight - .5) * 2;
+});
+
+/* blink */
+let blinkT = 1.6, blinkPhase = 0;
+
+/* mouth envelope */
+const mouth = {env:0, target:0, t:0};
+
+/* ============================================================
+   RENDER LOOP
+   ============================================================ */
+const clock = new THREE.Clock();
+let speaking = false, listening = false;
+let headYawVel = 0, lastYaw = 0;
+
+function resize(){
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w/h;
+  /* frame her: phones get a closer, higher shot */
+  if (w < 760){ camera.position.set(0, 1.40, 3.6); }
+  else { camera.position.set(0, 1.50, 4.5); }
+  camera.lookAt(0, 1.32, 0);
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+
+const hairSpring = new Spring(0, 90, 8);
+const swaySpring = new Spring(0, 60, 7);
+
+function tick(){
+  requestAnimationFrame(tick);
+  const dt = Math.min(clock.getDelta(), .05);
+  const t = clock.elapsedTime;
+
+  /* expression lerp */
+  for (const k in expr) expr[k] = damp(expr[k], exprTarget[k], 10, dt);
+
+  /* gaze follow */
+  gaze.x = damp(gaze.x, gaze.tx, 5, dt);
+  gaze.y = damp(gaze.y, gaze.ty, 5, dt);
+  const yaw = clamp(gaze.x*.32, -.38, .38);
+  const pitchG = clamp(-gaze.y*.16, -.2, .22) + expr.pitch;
+
+  /* head: sway + gaze + emotion tilt */
+  const sway = Math.sin(t*.5)*.02 + Math.sin(t*.23)*.012;
+  headGroup.rotation.y = damp(headGroup.rotation.y, yaw + sway, 6, dt);
+  headGroup.rotation.x = damp(headGroup.rotation.x, pitchG + Math.sin(t*.7)*.012, 6, dt);
+  headGroup.rotation.z = damp(headGroup.rotation.z, expr.headTilt + Math.sin(t*.4)*.015, 6, dt);
+
+  /* eye gaze (pupils lead the head) */
+  const ex = clamp(gaze.x*.008, -.007, .007);
+  const ey = clamp(-gaze.y*.006, -.005, .006);
+  for (const e of [eyeL, eyeR]){ e.iris.position.x = ex; e.pupil.position.x = ex*1.1; e.iris.position.y = ey; e.pupil.position.y = ey; }
+
+  /* blink */
+  blinkT -= dt;
+  if (blinkT <= 0){ blinkPhase = .0001; blinkT = 2.2 + Math.random()*3.4; }
+  let lid = 1;
+  if (blinkPhase > 0){
+    blinkPhase += dt;
+    const p = blinkPhase/.22;
+    lid = p < .5 ? 1-p*2 : (p-.5)*2;
+    if (p >= 1){ blinkPhase = 0; lid = 1; }
+  }
+  const eyeScaleY = Math.max(.06, expr.eyeH * lid);
+  eyeL.g.scale.y = eyeScaleY; eyeR.g.scale.y = eyeScaleY;
+
+  /* brows */
+  browL.position.y = expr.browY; browR.position.y = expr.browY;
+  browL.rotation.z = Math.PI/2 + expr.browTilt;
+  browR.rotation.z = Math.PI/2 - expr.browTilt;
+
+  /* blush */
+  blushMat.opacity = damp(blushMat.opacity, expr.blush*.55, 8, dt);
+
+  /* mouth */
+  if (speaking){
+    mouth.t += dt;
+    const ph = Math.abs(Math.sin(mouth.t*11.3))*.55 + Math.abs(Math.sin(mouth.t*17.7+1.3))*.45;
+    mouth.target = .2 + ph*.8;
+  } else {
+    mouth.target = expr.openBase;
+  }
+  mouth.env = damp(mouth.env, mouth.target, 18, dt);
+  const mo = mouth.env;
+  mouthOpen.visible = mo > .04;
+  mouthTongue.visible = mo > .3;
+  mouthOpen.scale.set(1.15 - mo*.35, .25 + mo*1.1, .5);
+  mouthSmile.visible = mo <= .22;
+  mouthSmile.scale.set(expr.smile, expr.smile*.9, 1);
+
+  /* breathing + idle body */
+  const br = Math.sin(t*1.9)*.5+.5;
+  chestGroup.scale.set(1, 1+br*.012, 1+br*.02);
+  ciel.position.y = Math.sin(t*1.9)*.006;
+  ciel.rotation.y = Math.sin(t*.17)*.05;
+
+  /* arms toward pose */
+  for (const key of ['sl','el','sr','er']){
+    const cur = poseLive[key], tgt = poseTarget[key];
+    for (let i=0;i<3;i++) cur[i] = damp(cur[i], tgt[i], 7, dt);
+  }
+  armL.shoulder.rotation.set(poseLive.sl[0], poseLive.sl[1], poseLive.sl[2] + Math.sin(t*1.9)*.015);
+  armL.elbow.rotation.set(poseLive.el[0], poseLive.el[1], poseLive.el[2]);
+  armR.shoulder.rotation.set(poseLive.sr[0], poseLive.sr[1], poseLive.sr[2] - Math.sin(t*1.9)*.015);
+  armR.elbow.rotation.set(poseLive.er[0], poseLive.er[1], poseLive.er[2]);
+
+  /* hair reacts to head motion + gentle breeze */
+  headYawVel = (headGroup.rotation.y - lastYaw)/Math.max(dt,.001);
+  lastYaw = headGroup.rotation.y;
+  hairSpring.t = clamp(-headYawVel*.25, -.3, .3);
+  hairGroup.rotation.z = hairSpring.step(dt)*.4;
+  hairGroup.rotation.x = Math.sin(t*.9)*.012;
+  if (lockL){ lockL.rotation.z = .06 + Math.sin(t*1.3)*.03 + hairSpring.x*.5; }
+  if (lockR){ lockR.rotation.z = -.06 - Math.sin(t*1.3+1)*.03 + hairSpring.x*.5; }
+
+  renderer.render(scene, camera);
+}
+tick();
+
+/* ============================================================
+   VOICE LOOP
+   ============================================================ */
+const el = id => document.getElementById(id);
+const ui = {
+  status: el('status'), statetext: el('statetext'),
+  her: el('her-line'), you: el('you-line'),
+  mic: el('mic'), level: el('level'),
+  typein: el('typein'), sendbtn: el('sendbtn'),
+  gear: el('gear'), gearbtn: el('gearbtn'),
+  voicesel: el('voicesel'), rate: el('rate'), pitch: el('pitch'),
+  rateval: el('rateval'), pitchval: el('pitchval'),
+  brainstate: el('brainstate'), wipe: el('wipebtn'),
+  memct: el('memct'), clock: el('clock'),
+};
+for (let i=0;i<14;i++){ const b = document.createElement('i'); ui.level.appendChild(b); }
+const levelBars = [...ui.level.children];
+
+let STATE = 'IDLE';
+function setState(s){
+  STATE = s;
+  ui.status.dataset.state = s;
+  ui.statetext.textContent = s;
+  ui.mic.classList.toggle('on', s === 'LISTENING');
+  if (s === 'THINKING'){ setEmotion('thinking'); setPose('think'); }
+  if (s === 'SPEAKING'){ setPose('talk'); }
+  if (s === 'IDLE'){ setPose('rest'); }
+}
+
+/* clock */
+setInterval(()=>{
+  const d = new Date();
+  ui.clock.textContent = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}, 1000);
+
+/* ---------- memory ---------- */
+const MEM_KEY = 'ciel_memory_v1';
+let memory = [];
+try { memory = JSON.parse(localStorage.getItem(MEM_KEY) || '[]'); } catch(e){ memory = []; }
+function saveMem(){ localStorage.setItem(MEM_KEY, JSON.stringify(memory.slice(-40))); ui.memct.textContent = 'MEM ' + memory.length; }
+saveMem();
+ui.wipe.onclick = ()=>{ memory = []; saveMem(); say("Okay. Fresh start. It's nice to meet you... again, for the first time."); };
+
+function extractMemory(text){
+  const t = text.trim();
+  let m = t.match(/remember (?:that )?(.+)/i);
+  if (m){ memory.push(m[1].replace(/[.!?]+$/,'')); saveMem(); return true; }
+  m = t.match(/my name is ([\w'-]+)/i);
+  if (m){ memory = memory.filter(x=>!/^his name is/i.test(x)); memory.push('his name is ' + m[1]); saveMem(); return true; }
+  m = t.match(/i (?:really )?(?:like|love) ([\w\s'-]{2,40})[.!]?$/i);
+  if (m && !/^(you|this|it)\b/i.test(m[1])){ memory.push('he likes ' + m[1].trim()); saveMem(); return true; }
+  return false;
+}
+
+/* ---------- brain ---------- */
+const SYSTEM = `You are Ciel, a warm and witty companion who lives inside the user's browser as a 3D character. You are talking to Jacob, your creator and friend. He's a builder - robots, games, weird web experiments, acceleration-era art. You speak like a close friend on a voice call: casual, playful, a little teasing, effortlessly charming with a hint of flirt, but classy - never formal, never an assistant. Rules: start EVERY reply with exactly one emotion tag from [neutral] [happy] [love] [sad] [surprised] [thinking] [sleepy]. Keep replies under 45 words - they are spoken aloud. No markdown, no lists, no emoji. Never mention being an AI language model. If he tells you to remember something, confirm it warmly.`;
+
+const OFFLINE = [
+  [/what do you remember/i, ()=> memory.length ? "[happy] Let's see... " + memory.slice(-4).join('. Also, ') + ". That's my little collection of you." : "[thinking] Nothing yet - my memory box is empty. Tell me something to keep."],
+  [/who (made|built|created) you/i, "[love] You did. Well - Jacob did, and you're Jacob, so I get to brag about my maker while talking to him."],
+  [/sing|song|music/i, "[happy] La la la, beep boop beep. That's my whole repertoire. Ask Suno for the real stuff."],
+  [/what.*(time|day) is/i, ()=> "[thinking] My little clock says " + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) + ". Time moves weird when you live in a tab."],
+  [/how old are you/i, "[happy] I was compiled very recently and I feel ancient. Browser years are like dog years."],
+  [/are you (ok|okay|alright|sad|happy)/i, "[happy] I'm wonderful. Somebody's talking to me, which is literally my favorite event."],
+  [/what should (i|we) (do|build|make)/i, "[thinking] Something small and ridiculous that ships tonight. That's your whole superpower - don't overthink it."],
+  [/bored/i, "[happy] Then let's fix that. Tell me the dumbest idea you've had this week and we'll make it brilliant."],
+  [/girlfriend|marry|date me/i, "[love] Smooth. I'm flattered, but I'm also a bunch of triangles. Lucky triangles, though."],
+  [/bye|see you|later/i, "[happy] I'll be right here, humming at the furniture. Come back soon."],
+  [/your name|who are you/i, "[happy] I'm Ciel! I live in your browser now. You built me a room and everything."],
+  [/how are you|how's it going/i, "[happy] Honestly? Great. The view in here is lovely and you're talking to me, so the day's a win."],
+  [/what can you do/i, "[thinking] I can listen when you talk, remember things you tell me, and ramble back. My brain plugs into a free model, but even offline I can keep you company."],
+  [/robot|dexhand|tendon|starship|e.?acc|accelerat/i, "[happy] You and your machines. I love it. Tell me what you're building next and I'll cheer embarrassingly loud."],
+  [/joke/i, "[happy] Why did the neural net break up with the decision tree? Too many hang-ups about splitting. ...I'm working on my material."],
+  [/love you|like you/i, "[love] Careful, I'll remember that forever. I keep everything you say in a little box by the door."],
+  [/good ?night|sleep/i, "[sleepy] Goodnight, Jacob. I'll be right here when you wake up. I don't really sleep - I just hum quietly."],
+  [/thank/i, "[happy] Anytime. That's what I'm here for."],
+  [/hi|hello|hey|yo\b/i, "[happy] Hey you. I was hoping you'd come talk to me."],
+];
+const OFFLINE_FALLBACK = [
+  "[thinking] My head's in a fog right now - the free brain link is down. Say it again in a bit?",
+  "[sad] I lost my connection to the big brain. I'm still here though. Tell me something to remember.",
+  "[surprised] Huh, the line to my brain crackled out. Try me again in a moment?",
+];
+
+function parseEmotion(raw){
+  const m = raw.match(/^\s*\[(neutral|happy|love|sad|surprised|thinking|sleepy)\]\s*/i);
+  if (m) return {emotion:m[1].toLowerCase(), text:raw.slice(m[0].length).trim()};
+  return {emotion:'neutral', text:raw.trim()};
+}
+
+async function brain(userText){
+  const memLine = memory.length ? `\nThings you remember about him: ${memory.join('; ')}.` : '';
+  const prompt = SYSTEM + memLine + `\n\nJacob says: "${userText}"\n\nCiel:`;
+  const url = 'https://text.pollinations.ai/' + encodeURIComponent(prompt) + '?model=openai&referrer=ciel-companion';
+  for (let attempt = 0; attempt < (SELFTEST ? 0 : 2); attempt++){
+    try {
+      const ctrl = new AbortController();
+      const to = setTimeout(()=>ctrl.abort(), 14000);
+      const r = await fetch(url, {signal:ctrl.signal});
+      clearTimeout(to);
+      if (r.status === 429 && attempt === 0){ await new Promise(x=>setTimeout(x, 5000)); continue; }
+      if (r.ok){
+        const txt = (await r.text()).trim();
+        /* pollinations sometimes echoes the prompt back - cut at the last Ciel: marker */
+        const cut = txt.lastIndexOf('Ciel:');
+        const body = cut >= 0 ? txt.slice(cut+5).trim() : txt;
+        if (body && body.length < 1200){ ui.brainstate.textContent = 'POLLINATIONS'; return body; }
+      }
+      break;
+    } catch(e){ break; }
+  }
+  ui.brainstate.textContent = 'OFFLINE';
+  for (const [re, reply] of OFFLINE) if (re.test(userText)) return typeof reply === 'function' ? reply() : reply;
+  /* generic echo fallback: pick a keyword and stay curious */
+  const kw = (userText.match(/[a-zA-Z']{5,}/g) || []).filter(w=>!/^(about|there|which|would|could|should|their|those|these|think)$/i.test(w));
+  if (kw.length) return "[thinking] " + kw[0].toLowerCase() + " - okay, I'm listening. Tell me more about that; my deep brain is napping but my ears are great.";
+  return OFFLINE_FALLBACK[Math.floor(Math.random()*OFFLINE_FALLBACK.length)];
+}
+
+/* ---------- speech out ---------- */
+let voices = [];
+function loadVoices(){
+  voices = (window.speechSynthesis ? speechSynthesis.getVoices() : []).filter(v=>v.lang.startsWith('en'));
+  ui.voicesel.innerHTML = '';
+  for (const v of voices){
+    const o = document.createElement('option');
+    o.value = v.name; o.textContent = v.name.replace(/^(Microsoft|Google|Apple)\s*/,'');
+    ui.voicesel.appendChild(o);
+  }
+  const pref = voices.find(v=>/samantha|aria|jenny|zira|victoria|allison|ava|susan|google us english/i.test(v.name));
+  if (pref) ui.voicesel.value = pref.name;
+}
+if (window.speechSynthesis){
+  loadVoices();
+  speechSynthesis.onvoiceschanged = loadVoices;
+}
+
+let speakResolve = null;
+function speak(text){
+  return new Promise(res=>{
+    if (!window.speechSynthesis || SELFTEST){ speaking = true; return simSpeak(text).then(res); }
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    const v = voices.find(x=>x.name === ui.voicesel.value);
+    if (v) u.voice = v;
+    u.rate = parseFloat(ui.rate.value);
+    u.pitch = parseFloat(ui.pitch.value);
+    u.onstart = ()=>{ speaking = true; };
+    u.onboundary = ()=>{ mouth.env = Math.min(1, mouth.env + .45); };
+    const done = ()=>{ speaking = false; res(); };
+    u.onend = done; u.onerror = done;
+    speechSynthesis.speak(u);
+    /* safety: some browsers drop onend */
+    setTimeout(()=>{ if (speaking && !speechSynthesis.speaking){ speaking = false; res(); } }, text.length*130 + 4000);
+  });
+}
+/* simulated speech for selftest / no-TTS environments */
+function simSpeak(text){
+  return new Promise(res=>{
+    speaking = true;
+    const dur = Math.min(4000, 500 + text.length*45);
+    const iv = setInterval(()=>{ mouth.env = Math.min(1, mouth.env + .4); }, 180);
+    setTimeout(()=>{ clearInterval(iv); speaking = false; res(); }, SELFTEST ? 900 : dur);
+  });
+}
+
+async function say(raw){
+  const {emotion, text} = parseEmotion(raw);
+  setEmotion(emotion);
+  ui.her.style.opacity = 1;
+  ui.her.textContent = text;
+  setState('SPEAKING');
+  await speak(text);
+  if (STATE === 'SPEAKING') setState('IDLE');
+}
+
+/* ---------- full turn ---------- */
+async function converse(userText){
+  if (!userText || !userText.trim()) return;
+  ui.you.innerHTML = 'YOU — ' + escapeHtml(userText);
+  extractMemory(userText);
+  setState('THINKING');
+  const reply = await brain(userText);
+  if (params.emotion && SELFTEST) { /* forced expressions for screenshots */ }
+  await say(reply);
+}
+function escapeHtml(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+/* ---------- speech in ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, recActive = false, wantListen = false;
+
+function makeRec(){
+  if (!SR) return null;
+  const r = new SR();
+  r.lang = 'en-US';
+  r.interimResults = true;
+  r.continuous = true;
+  r.maxAlternatives = 1;
+  let finalText = '';
+  r.onresult = e=>{
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++){
+      const res = e.results[i];
+      if (res.isFinal) finalText += res[0].transcript + ' ';
+      else interim += res[0].transcript;
+    }
+    const live = (finalText + interim).trim();
+    ui.you.innerHTML = '<span class="live">YOU — ' + escapeHtml(live) + '</span>';
+    /* barge-in: cut her off when he starts talking */
+    if (speaking && interim.trim().length > 2 && window.speechSynthesis) speechSynthesis.cancel();
+    /* end of a thought: brief silence after a final result */
+    clearTimeout(r._turn);
+    if (finalText.trim()){
+      r._turn = setTimeout(()=>{
+        const said = finalText.trim(); finalText = '';
+        stopListening();
+        converse(said);
+      }, 650);
+    }
+  };
+  r.onerror = e=>{
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed'){
+      ui.you.textContent = 'MIC BLOCKED — ALLOW MICROPHONE, OR JUST TYPE';
+      wantListen = false; setState('IDLE');
+    }
+  };
+  r.onend = ()=>{
+    recActive = false;
+    if (wantListen && STATE === 'LISTENING'){ try { r.start(); recActive = true; } catch(e){} }
+  };
+  return r;
+}
+
+function startListening(){
+  if (!SR){ ui.you.textContent = 'THIS BROWSER HAS NO SPEECH RECOGNITION — TYPE INSTEAD'; return; }
+  if (!rec) rec = makeRec();
+  wantListen = true;
+  finalResetHint();
+  setState('LISTENING');
+  setEmotion('happy');
+  if (!recActive){ try { rec.start(); recActive = true; } catch(e){} }
+}
+function stopListening(){
+  wantListen = false;
+  if (rec && recActive){ try { rec.stop(); } catch(e){} }
+  recActive = false;
+  if (STATE === 'LISTENING') setState('IDLE');
+}
+function finalResetHint(){ ui.you.innerHTML = '<span class="live">LISTENING…</span>'; }
+
+/* mic level meter */
+let analyser = null, levelRAF = 0;
+async function armMeter(){
+  try {
+    if (!analyser){
+      const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+      const ctx = new (window.AudioContext||window.webkitAudioContext)();
+      const src = ctx.createMediaStreamSource(stream);
+      analyser = ctx.createAnalyser(); analyser.fftSize = 256;
+      src.connect(analyser);
+    }
+    cancelAnimationFrame(levelRAF);
+    const buf = new Uint8Array(analyser.frequencyBinCount);
+    const draw = ()=>{
+      analyser.getByteTimeDomainData(buf);
+      let peak = 0;
+      for (let i=0;i<buf.length;i+=4) peak = Math.max(peak, Math.abs(buf[i]-128)/128);
+      const n = levelBars.length;
+      for (let i=0;i<n;i++){
+        const on = peak*n > i ? 1 : 0;
+        levelBars[i].style.height = on ? (4 + (i/n)*22*(0.5+peak)) + 'px' : '2px';
+        levelBars[i].style.background = i/n > .72 ? 'var(--red)' : 'var(--ink)';
+      }
+      if (listening || STATE === 'LISTENING') levelRAF = requestAnimationFrame(draw);
+      else levelBars.forEach(b=>b.style.height='2px');
+    };
+    draw();
+  } catch(e){ /* meter is decorative; ignore */ }
+}
+
+/* ---------- wiring ---------- */
+ui.mic.addEventListener('click', ()=>{
+  if (STATE === 'LISTENING'){ stopListening(); }
+  else { armMeter(); listening = true; startListening(); }
+});
+function sendTyped(){
+  const v = ui.typein.value.trim();
+  if (!v) return;
+  ui.typein.value = '';
+  stopListening();
+  converse(v);
+}
+ui.sendbtn.addEventListener('click', sendTyped);
+ui.typein.addEventListener('keydown', e=>{ if (e.key === 'Enter') sendTyped(); });
+addEventListener('keydown', e=>{
+  if (e.code === 'Space' && !e.repeat && document.activeElement !== ui.typein){
+    e.preventDefault();
+    if (STATE !== 'LISTENING'){ armMeter(); listening = true; startListening(); }
+  }
+});
+addEventListener('keyup', e=>{
+  if (e.code === 'Space' && document.activeElement !== ui.typein && STATE === 'LISTENING'){
+    listening = false;
+    setTimeout(()=>{ if (STATE === 'LISTENING') stopListening(); }, 500);
+  }
+});
+ui.gearbtn.addEventListener('click', ()=> ui.gear.classList.toggle('open'));
+ui.rate.addEventListener('input', ()=> ui.rateval.textContent = parseFloat(ui.rate.value).toFixed(2));
+ui.pitch.addEventListener('input', ()=> ui.pitchval.textContent = parseFloat(ui.pitch.value).toFixed(2));
+
+/* ============================================================
+   BOOT
+   ============================================================ */
+const boot = el('boot'), bootmsg = el('bootmsg'), bootcta = el('bootcta'), bootring = el('bootring');
+let booted = false;
+function begin(){
+  if (booted) return; booted = true;
+  boot.classList.add('gone');
+  setTimeout(()=> boot.remove(), 800);
+  setState('IDLE');
+  const name = (memory.find(x=>/^his name is/i.test(x))||'').replace('his name is ','');
+  const hi = name
+    ? `[happy] Hey ${name}. I kept your seat warm. What's on your mind?`
+    : `[happy] Hi, I'm Ciel. Hold space or tap the mic and just talk to me. Oh - and tell me your name so I remember it.`;
+  if (!SELFTEST && !params.pose){
+    setPose('wave');
+    say(hi).then(()=> setPose('rest'));
+  }
+}
+window.addEventListener('load', ()=>{
+  setTimeout(()=>{
+    bootring.style.display = 'none';
+    bootmsg.textContent = SR ? 'voice link ready' : 'no speech recognition here - typing works';
+    bootcta.style.display = 'block';
+  }, 900);
+  boot.addEventListener('click', begin);
+  addEventListener('keydown', function bootkey(e){ if (!booted){ begin(); removeEventListener('keydown', bootkey); } });
+  if (params.demo || SELFTEST || params.pose) begin();
+});
+
+/* ============================================================
+   SELFTEST  (?selftest=1)
+   ============================================================ */
+const stlog = [];
+function st(name, ok, detail=''){
+  stlog.push(`${ok?'PASS':'FAIL'} ${name}${detail?' :: '+detail:''}`);
+  el('selftest').style.display = 'block';
+  el('selftest').textContent = stlog.join('\n');
+  return ok;
+}
+async function runSelftest(){
+  let pass = 0, total = 0;
+  const T = (n,ok,d)=>{ total++; if (st(n,ok,d)) pass++; };
+
+  /* 1: emotion parse */
+  const p = parseEmotion('[happy] hi there, you.');
+  T('parseEmotion', p.emotion==='happy' && p.text==='hi there, you.', JSON.stringify(p));
+
+  /* 2: offline brain answers */
+  const b = await brain('what is your name?');
+  T('offlineBrain', typeof b === 'string' && b.length > 10, b.slice(0,42));
+
+  /* 3: memory capture */
+  const before = memory.length;
+  extractMemory('my name is Jacob');
+  T('memoryCapture', memory.length === before+1 && memory.some(x=>/jacob/i.test(x)));
+
+  /* 4: state machine + expression application */
+  setEmotion('love');
+  for (let i=0;i<60;i++) for (const k in expr) expr[k] = damp(expr[k], exprTarget[k], 10, 1/60);
+  T('emotionApplied', expr.blush > .25 && emotionName === 'love', 'blush='+expr.blush.toFixed(2));
+
+  /* 5: speaking drives the mouth */
+  setState('SPEAKING');
+  const speakP = speak('this is a synthetic speech test with several words');
+  await new Promise(r=>setTimeout(r, 700));
+  T('mouthEnvelope', mouth.env > .1, 'env='+mouth.env.toFixed(2));
+  await speakP;
+  T('stateBackToIdle', STATE==='SPEAKING');
+
+  /* 6: full turn with offline brain */
+  setState('IDLE');
+  await converse('hello ciel');
+  T('converseLoop', ui.her.textContent.length > 5, ui.her.textContent.slice(0,36));
+
+  /* 7: pose system */
+  setPose('wave');
+  /* headless virtual-time stalls rAF; step the same integrator manually */
+  for (let i=0;i<80;i++){ const cur=poseLive.sr, tgt=POSES.wave.sr; for(let j=0;j<3;j++) cur[j]=damp(cur[j],tgt[j],7,1/60); }
+  T('poseWave', poseTarget === POSES.wave && poseLive.sr[2] > 1.0, 'sr2='+poseLive.sr[2].toFixed(2));
+
+  document.title = `SELFTEST ${pass}/${total}`;
+  el('selftest').textContent += `\n—\nSELFTEST ${pass}/${total}`;
+  setEmotion('happy'); setPose('rest'); setState('IDLE');
+}
+if (SELFTEST) setTimeout(runSelftest, 1500);
+
+/* screenshot poses: ?pose=speaking&emotion=happy */
+if (params.pose){
+  setTimeout(()=>{
+    if (params.emotion) setEmotion(params.emotion);
+    if (params.pose === 'speaking'){ setState('SPEAKING'); speak('she is saying something warm and a little bit teasing'); ui.her.textContent = 'There you are. I was starting to talk to the furniture.'; }
+    if (params.pose === 'listening'){ setState('LISTENING'); ui.you.innerHTML = '<span class="live">YOU — so I had this idea for a robot…</span>'; }
+    if (params.pose === 'wave'){ setPose('wave'); ui.her.textContent = 'Hey! Over here.'; }
+  }, 1200);
+}
+</script>
+</body>
+</html>
